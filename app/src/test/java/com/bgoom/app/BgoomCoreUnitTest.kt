@@ -120,4 +120,68 @@ class BgoomCoreUnitTest {
         assertEquals("image/jpeg", AndroidFileHelper.guessMimeType("id_photo.jpg"))
         assertEquals("text/plain", AndroidFileHelper.guessMimeType("notes.typ"))
     }
+
+    @Test
+    fun githubWebReleaseScraperParsesTagNotesAndExpandedAssets() {
+        assertEquals(
+            "v1.1.1",
+            GitHubUpdater.extractTagFromUrl("https://github.com/smartThise/bgoom/releases/tag/v1.1.1")
+        )
+        assertEquals(
+            "v1.2.0",
+            GitHubUpdater.extractTagFromUrl("https://ghfast.top/https://github.com/smartThise/bgoom/releases/tag/v1.2.0?foo=bar")
+        )
+        assertEquals(
+            "v1.1.1",
+            GitHubUpdater.extractTagFromHtml(
+                """<a href="/smartThise/bgoom/releases/tag/v1.1.1">v1.1.1</a>""",
+                "smartThise/bgoom",
+            )
+        )
+        assertEquals("https://ghfast.top/", GitHubUpdater.normalizeMirrorPrefix("https://ghfast.top"))
+        assertEquals("https://ghfast.top/", GitHubUpdater.normalizeMirrorPrefix("https://ghfast.top/"))
+
+        val releaseHtml = """
+            <div class="header">noise</div>
+            <div data-pjax="true" class="markdown-body tmp-my-3">
+              <h2>大爆 BGOOM v1.1.2</h2>
+              <div class="highlight"><pre>echo "ok &amp; fast"</pre></div>
+              <ul>
+                <li>修复更新检查限流</li>
+                <li>支持 SHA-256 校验</li>
+              </ul>
+            </div>
+            <div>after</div>
+        """.trimIndent()
+        val notes = GitHubUpdater.extractReleaseNotesFromHtml(releaseHtml)
+        assertTrue(notes.contains("大爆 BGOOM v1.1.2"))
+        assertTrue(notes.contains("echo \"ok & fast\""))
+        assertTrue(notes.contains("• 修复更新检查限流"))
+        assertFalse(notes.contains("after"))
+
+        val expandedHtml = """
+            <ul>
+              <li class="Box-row">
+                <a href="/smartThise/bgoom/releases/download/v1.1.1/BGOOM-v1.1.1-debug.apk">debug</a>
+                <span>68 MB</span>
+              </li>
+              <li class="Box-row">
+                <a href="/smartThise/bgoom/releases/download/v1.1.1/BGOOM-v1.1.1-release.apk">
+                  <span class="text-bold">BGOOM-v1.1.1-release.apk</span>
+                </a>
+                <span class="Truncate-text">sha256:4040074c01a8182c2d9de4443eff180b5c1203430a86f8cec927bff8224cab32</span>
+                <span class="color-fg-muted">71 MB</span>
+              </li>
+            </ul>
+        """.trimIndent()
+        val asset = GitHubUpdater.extractApkAssetFromExpandedAssetsHtml(expandedHtml, "smartThise/bgoom", "v1.1.1")
+        assertTrue(asset != null)
+        assertEquals("BGOOM-v1.1.1-release.apk", asset!!.name)
+        assertEquals(
+            "https://github.com/smartThise/bgoom/releases/download/v1.1.1/BGOOM-v1.1.1-release.apk",
+            asset.downloadUrl
+        )
+        assertEquals("4040074c01a8182c2d9de4443eff180b5c1203430a86f8cec927bff8224cab32", asset.sha256)
+        assertEquals(71L * 1024L * 1024L, asset.approxSizeBytes)
+    }
 }

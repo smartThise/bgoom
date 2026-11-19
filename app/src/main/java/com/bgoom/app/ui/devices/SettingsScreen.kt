@@ -95,7 +95,10 @@ fun SettingsScreen(
                         onClick = {
                             scope.launch {
                                 checkingUpdate = true
-                                GitHubUpdater.checkLatestRelease(githubRepo.trim())
+                                GitHubUpdater.checkLatestRelease(
+                                    repo = githubRepo.trim(),
+                                    mirrorPrefix = githubMirror.trim(),
+                                )
                                     .onSuccess { info ->
                                         if (info.isNewer) {
                                             onUpdateFound(info)
@@ -130,7 +133,7 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = githubMirror,
                     onValueChange = { githubMirror = it },
-                    label = { Text("下载加速前缀（可选，国内直连慢时填写）") },
+                    label = { Text("GitHub 加速前缀（可选，国内直连检查与下载慢时填写）") },
                     placeholder = { Text("例如 https://ghfast.top/") },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),

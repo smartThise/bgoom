@@ -176,7 +176,10 @@ fun BgoomRoot(
     LaunchedEffect(Unit) {
         val repo = settings.githubRepo
         if (repo.isNotBlank()) {
-            GitHubUpdater.checkLatestRelease(repo).onSuccess { info ->
+            GitHubUpdater.checkLatestRelease(
+                repo = repo,
+                mirrorPrefix = settings.githubMirrorPrefix,
+            ).onSuccess { info ->
                 if (info.isNewer) {
                     availableUpdate = info
                     BgoomNotifier.showUpdateAlert(context, info.tagName, info.releaseNotes.lines().firstOrNull().orEmpty())
