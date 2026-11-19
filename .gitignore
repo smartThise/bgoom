@@ -1,0 +1,16 @@
+local.properties
+.gradle/
+.kotlin/
+.cxx/
+app/.cxx/
+build/
+app/build/
+rust-typst/target/
+rust-typst/.cargo/config.toml
+.idea/
+*.iml
+.DS_Store
+._*
+dist/
+scripts/texo_raw/
+scripts/*_fp32.onnx

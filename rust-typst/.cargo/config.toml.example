@@ -1,0 +1,4 @@
+# Copy to rust-typst/.cargo/config.toml and point to your local Android NDK LLVM toolchain:
+[target.aarch64-linux-android]
+linker = "/path/to/android-sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android26-clang"
+ar = "/path/to/android-sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
