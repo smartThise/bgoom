@@ -18,42 +18,64 @@ import com.bgoom.app.MainActivity
 import com.bgoom.app.R
 
 /**
- * System-level notifications + Android 16+ Live Updates (实况胶囊 / 灵动岛) manager.
- * - Uses official Android 16 (API 36) `android.requestPromotedOngoing` + `setOngoing(true)` +
- *   `Notification.ProgressStyle` + `setShortCriticalText(...)` so BOTH live progress AND file/note
- *   arrivals satisfy `hasPromotableCharacteristics()` and promote to the status-bar live capsule.
- * - Pairs with `DynamicCapsuleOverlay` for guaranteed top-bar capsule pop-ups across MagicOS 8/9/10
- *   and all Android versions.
+ * Pure OS-level notification & Android 16+ Live Updates (系统级实况胶囊) manager.
+ *
+ * Key design rules for genuine OS-level Live Updates (API 36 / MagicOS 10 / ColorOS 16 / HyperOS 3):
+ * 1. The idle 24/7 foreground service runs on a quiet IMPORTANCE_LOW channel WITHOUT promoted flags,
+ *    so it never hogs or throttles the app's Live Capsule slot.
+ * 2. Active transfers & incoming arrivals use a dedicated IMPORTANCE_HIGH channel (`bgoom_live_capsule_v2`)
+ *    with `setOngoing(true)`, `android.requestPromotedOngoing = true`, explicit `ProgressStyle` segment,
+ *    `setShortCriticalText(...)`, and a monochrome 24dp status-bar icon (`ic_stat_bgoom`).
+ * 3. Arrival notifications set `setOnlyAlertOnce(false)` so the system expands/pops the capsule on arrival,
+ *    with direct tap-to-open, a "关闭" action, and a 45s auto-timeout.
  */
 object BgoomNotifier {
 
-    const val CHANNEL_LIVE_CAPSULE = "bgoom_live_capsule"
+    const val CHANNEL_SERVICE = "bgoom_bg_service"
+    const val CHANNEL_LIVE_CAPSULE = "bgoom_live_capsule_v2"
     const val CHANNEL_ALERTS = "bgoom_incoming_alerts"
 
     const val NOTIF_ID_SERVICE = 1001
     const val NOTIF_ID_TRANSFER_CAPSULE = 1002
     private var alertSeq = 2000
 
+    private const val ACCENT_BLUE = 0xFF0B57D0.toInt()
+    private const val ACCENT_GREEN = 0xFF188038.toInt()
+
     fun ensureChannels(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val capsule = NotificationChannel(
-            CHANNEL_LIVE_CAPSULE,
-            "大爆实时传输胶囊",
-            NotificationManager.IMPORTANCE_DEFAULT,
+
+        val bgService = NotificationChannel(
+            CHANNEL_SERVICE,
+            "后台常驻连接状态",
+            NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "实时监听电脑推送、传输进度与状态栏实况胶囊"
+            description = "保持手机与电脑的加密连接在线（静默常驻，不占用实况胶囊）"
             setSound(null, null)
             enableVibration(false)
+            setShowBadge(false)
         }
+
+        val liveCapsule = NotificationChannel(
+            CHANNEL_LIVE_CAPSULE,
+            "大爆系统实况胶囊",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "收发电脑文件与便签时触发系统级实况胶囊 / 实时更新，点击直接打开"
+            enableVibration(true)
+        }
+
         val alerts = NotificationChannel(
             CHANNEL_ALERTS,
             "收到电脑文件与便签提醒",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "电脑发送文件或便签到手机时弹出系统通知，点击可直接打开"
+            description = "电脑发送文件或便签到手机时弹出系统高优提醒，点击可直接打开"
             enableVibration(true)
         }
-        nm.createNotificationChannel(capsule)
+
+        nm.createNotificationChannel(bgService)
+        nm.createNotificationChannel(liveCapsule)
         nm.createNotificationChannel(alerts)
     }
 
@@ -90,28 +112,20 @@ object BgoomNotifier {
         putBoolean("android.requestPromotedOngoing", true)
     }
 
+    /**
+     * Quiet foreground service notification — intentionally NOT promoted so it never occupies
+     * the system Live Capsule slot while idle.
+     */
     fun buildListeningNotification(context: Context, deviceName: String): Notification {
         ensureChannels(context)
-        val openApp = pendingOpenApp(context)
-        if (Build.VERSION.SDK_INT >= 36) {
-            return Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("大爆已连线 · $deviceName")
-                .setContentText("实时等待电脑右键推送文件或便签")
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setContentIntent(openApp)
-                .addExtras(promotedExtras())
-                .setShortCriticalText("大爆在线")
-                .build()
-        }
-        return NotificationCompat.Builder(context, CHANNEL_LIVE_CAPSULE)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+        return NotificationCompat.Builder(context, CHANNEL_SERVICE)
+            .setSmallIcon(R.drawable.ic_stat_bgoom)
             .setContentTitle("大爆已连线 · $deviceName")
-            .setContentText("实时等待电脑右键推送文件或便签")
+            .setContentText("后台静默待命，电脑发来文件自动接收")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setContentIntent(openApp)
+            .setSilent(true)
+            .setContentIntent(pendingOpenApp(context))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
@@ -128,33 +142,37 @@ object BgoomNotifier {
         ensureChannels(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val openApp = pendingOpenApp(context)
+        val pct = progressPercent.coerceIn(0, 100)
 
         val notif = if (Build.VERSION.SDK_INT >= 36) {
-            val builder = Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+            Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
+                .setSmallIcon(R.drawable.ic_stat_bgoom)
                 .setContentTitle(title)
                 .setContentText(subtitle)
                 .setOngoing(ongoing)
                 .setOnlyAlertOnce(true)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
                 .setContentIntent(openApp)
                 .addExtras(promotedExtras())
-                .setShortCriticalText(shortChip.take(10))
-            if (progressPercent in 0..100) {
-                builder.setStyle(
+                .setShortCriticalText(shortChip.take(7))
+                .setStyle(
                     Notification.ProgressStyle()
-                        .setProgress(progressPercent)
+                        .setProgressSegments(
+                            listOf(Notification.ProgressStyle.Segment(100).setColor(ACCENT_BLUE))
+                        )
+                        .setProgress(pct)
                         .setStyledByProgress(true)
                 )
-            }
-            builder.build()
+                .build()
         } else {
             NotificationCompat.Builder(context, CHANNEL_LIVE_CAPSULE)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_bgoom)
                 .setContentTitle(title)
                 .setContentText(subtitle)
                 .setOngoing(ongoing)
                 .setOnlyAlertOnce(true)
-                .setProgress(100, progressPercent.coerceIn(0, 100), progressPercent < 0)
+                .setProgress(100, pct, progressPercent < 0)
                 .setContentIntent(openApp)
                 .build()
         }
@@ -177,35 +195,42 @@ object BgoomNotifier {
         ensureChannels(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val openFilePi = pendingOpenFile(context, fileName, contentUri, mimeType)
+        val dismissPi = pendingDismissCapsule(context)
 
-        // 1. On Android 16 (API 36+), morph the Live Capsule into a promotable 100% ongoing arrival pill
-        //    that satisfies hasPromotableCharacteristics() and auto-clears after 18 seconds (or on tap).
-        if (Build.VERSION.SDK_INT >= 36) {
+        if (Build.VERSION.SDK_INT >= 36 && canPostPromotedNotifications(context)) {
+            // Genuine Android 16 promoted Live Update capsule on IMPORTANCE_HIGH channel.
+            // Cancel first + setOnlyAlertOnce(false) so the OS pops/expands the capsule on arrival!
+            nm.cancel(NOTIF_ID_TRANSFER_CAPSULE)
             val capsuleNotif = Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_bgoom)
                 .setContentTitle("收到文件 · $fileName")
-                .setContentText("来自 $deviceName · 点击直接打开")
+                .setContentText("来自 $deviceName · 已存至「下载/BGOOM」，点击直接打开")
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setTimeoutAfter(18_000L)
+                .setOnlyAlertOnce(false)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
+                .setTimeoutAfter(45_000L)
                 .setContentIntent(openFilePi)
                 .addExtras(promotedExtras())
                 .setShortCriticalText("收到文件")
                 .setStyle(
                     Notification.ProgressStyle()
+                        .setProgressSegments(
+                            listOf(Notification.ProgressStyle.Segment(100).setColor(ACCENT_GREEN))
+                        )
                         .setProgress(100)
                         .setStyledByProgress(true)
                 )
                 .addAction(Notification.Action.Builder(null, "直接打开", openFilePi).build())
+                .addAction(Notification.Action.Builder(null, "关闭", dismissPi).build())
                 .build()
             nm.notify(NOTIF_ID_TRANSFER_CAPSULE, capsuleNotif)
-        } else {
-            nm.cancel(NOTIF_ID_TRANSFER_CAPSULE)
+            return
         }
 
-        // 2. Persistent heads-up notification in shade so user never misses files even after unlock.
-        val shadeNotif = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+        nm.cancel(NOTIF_ID_TRANSFER_CAPSULE)
+        val alertNotif = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_stat_bgoom)
             .setContentTitle("收到文件 · $fileName")
             .setContentText("来自 $deviceName · 已存入「下载/BGOOM」，点击直接打开")
             .setAutoCancel(true)
@@ -214,7 +239,7 @@ object BgoomNotifier {
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .addAction(0, "直接打开", openFilePi)
             .build()
-        nm.notify(++alertSeq, shadeNotif)
+        nm.notify(++alertSeq, alertNotif)
     }
 
     fun showIncomingNoteAlert(
@@ -236,26 +261,33 @@ object BgoomNotifier {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val suffix = if (copiedToClipboard) "（已同步到剪贴板）" else ""
+        val dismissPi = pendingDismissCapsule(context)
+        val suffix = if (copiedToClipboard) "（已复制剪贴板）" else ""
 
-        if (Build.VERSION.SDK_INT >= 36) {
+        if (Build.VERSION.SDK_INT >= 36 && canPostPromotedNotifications(context)) {
+            nm.cancel(NOTIF_ID_TRANSFER_CAPSULE)
             val capsuleNotif = Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_bgoom)
                 .setContentTitle("收到便签 · $deviceName$suffix")
-                .setContentText(preview.take(80))
+                .setContentText(preview.take(100))
+                .setStyle(Notification.BigTextStyle().bigText(preview.take(400)))
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setTimeoutAfter(15_000L)
+                .setOnlyAlertOnce(false)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
+                .setTimeoutAfter(30_000L)
                 .setContentIntent(openNotesPi)
                 .addExtras(promotedExtras())
                 .setShortCriticalText("收到便签")
-                .setStyle(Notification.BigTextStyle().bigText(preview.take(300)))
+                .addAction(Notification.Action.Builder(null, "查看", openNotesPi).build())
+                .addAction(Notification.Action.Builder(null, "关闭", dismissPi).build())
                 .build()
             nm.notify(NOTIF_ID_TRANSFER_CAPSULE, capsuleNotif)
+            return
         }
 
         val notif = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_bgoom)
             .setContentTitle("收到便签 · $deviceName$suffix")
             .setContentText(preview.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(preview.take(500)))
@@ -267,12 +299,60 @@ object BgoomNotifier {
         nm.notify(++alertSeq, notif)
     }
 
+    /**
+     * Sends a genuine OS-level Android 16 promoted Live Update test notification and reports
+     * exact OS capability/permission diagnostics (`canPostPromotedNotifications` + `hasPromotableCharacteristics`).
+     */
+    fun postTestSystemCapsule(context: Context): String {
+        if (!hasNotificationPermission(context)) {
+            return "未开启通知权限，请先允许大爆发送通知"
+        }
+        ensureChannels(context)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT < 36) {
+            return "当前为 Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})，系统原生实况胶囊需 Android 16+"
+        }
+        val canPost = canPostPromotedNotifications(context)
+        nm.cancel(NOTIF_ID_TRANSFER_CAPSULE)
+        val notif = Notification.Builder(context, CHANNEL_LIVE_CAPSULE)
+            .setSmallIcon(R.drawable.ic_stat_bgoom)
+            .setContentTitle("收到文件 · 测试文档.pdf")
+            .setContentText("系统级实况胶囊测试（15 秒后自动收回）")
+            .setOngoing(true)
+            .setOnlyAlertOnce(false)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
+            .setTimeoutAfter(15_000L)
+            .setContentIntent(pendingOpenApp(context))
+            .addExtras(promotedExtras())
+            .setShortCriticalText("收到文件")
+            .setStyle(
+                Notification.ProgressStyle()
+                    .setProgressSegments(
+                        listOf(Notification.ProgressStyle.Segment(100).setColor(ACCENT_GREEN))
+                    )
+                    .setProgress(100)
+                    .setStyledByProgress(true)
+            )
+            .addAction(Notification.Action.Builder(null, "关闭", pendingDismissCapsule(context)).build())
+            .build()
+        val promotable = runCatching { notif.hasPromotableCharacteristics() }.getOrDefault(false)
+        nm.notify(NOTIF_ID_TRANSFER_CAPSULE, notif)
+        return if (canPost && promotable) {
+            "已触发系统级实况胶囊（API ${Build.VERSION.SDK_INT} · 授权=是 · 合规=是）"
+        } else if (!canPost) {
+            "系统未授权实况通知（canPostPromoted=false），请先点「开启系统实况胶囊」授权"
+        } else {
+            "已发送通知（授权=$canPost · 合规=$promotable）"
+        }
+    }
+
     fun showUpdateAlert(context: Context, versionTag: String, summary: String) {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notif = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_bgoom)
             .setContentTitle("大爆有新版本 $versionTag")
             .setContentText(summary.ifBlank { "点击打开应用内一键下载并安装更新" })
             .setAutoCancel(true)
@@ -299,6 +379,18 @@ object BgoomNotifier {
             context,
             ++alertSeq,
             openViaTrampoline,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun pendingDismissCapsule(context: Context): PendingIntent {
+        val intent = Intent(context, BgoomNotifActionReceiver::class.java).apply {
+            action = BgoomNotifActionReceiver.ACTION_DISMISS_CAPSULE
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            NOTIF_ID_TRANSFER_CAPSULE,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }

@@ -12,7 +12,6 @@ import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import com.bgoom.app.BgoomApp
 import com.bgoom.app.notify.BgoomNotifier
-import com.bgoom.app.notify.DynamicCapsuleOverlay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -140,14 +139,6 @@ class BgoomSyncService : Service() {
                             progressPercent = pct,
                             ongoing = true,
                         )
-                        if (settings.enableFloatingCapsule) {
-                            DynamicCapsuleOverlay.showProgress(
-                                context = applicationContext,
-                                title = "正在接收 · $fileName",
-                                subtitle = "$pct%",
-                                progressPercent = pct,
-                            )
-                        }
                     }
                 )
                 res.onSuccess { events ->
@@ -162,15 +153,6 @@ class BgoomSyncService : Service() {
                                     contentUri = ev.savedFile.uri,
                                     mimeType = ev.savedFile.mimeType,
                                 )
-                                if (settings.enableFloatingCapsule) {
-                                    DynamicCapsuleOverlay.showFileArrived(
-                                        context = applicationContext,
-                                        fileName = ev.savedFile.fileName,
-                                        deviceName = device.name,
-                                        contentUri = ev.savedFile.uri,
-                                        mimeType = ev.savedFile.mimeType,
-                                    )
-                                }
                             } else if (!ev.isFile) {
                                 BgoomNotifier.showIncomingNoteAlert(
                                     context = applicationContext,
@@ -179,20 +161,11 @@ class BgoomSyncService : Service() {
                                     deviceName = device.name,
                                     copiedToClipboard = settings.autoCopyIncomingText,
                                 )
-                                if (settings.enableFloatingCapsule) {
-                                    DynamicCapsuleOverlay.showNoteArrived(
-                                        context = applicationContext,
-                                        deviceName = device.name,
-                                        preview = ev.previewOrPath,
-                                        copiedToClipboard = settings.autoCopyIncomingText,
-                                    )
-                                }
                             }
                         }
                     }
                 }.onFailure {
                     BgoomNotifier.cancelTransferCapsule(applicationContext)
-                    DynamicCapsuleOverlay.dismiss(applicationContext)
                     errorBackoffMs = minOf(errorBackoffMs + 3000L, 15_000L)
                 }
 
@@ -212,7 +185,6 @@ class BgoomSyncService : Service() {
         }
         networkCallback = null
         BgoomNotifier.cancelTransferCapsule(applicationContext)
-        DynamicCapsuleOverlay.dismiss(applicationContext)
         serviceScope.cancel()
         super.onDestroy()
     }

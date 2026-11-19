@@ -48,7 +48,6 @@ import com.bgoom.app.data.DeviceStore
 import com.bgoom.app.data.ThemeMode
 import com.bgoom.app.data.TypstCompileMode
 import com.bgoom.app.notify.BgoomNotifier
-import com.bgoom.app.notify.DynamicCapsuleOverlay
 import com.bgoom.app.update.GitHubUpdater
 import com.bgoom.app.update.ReleaseUpdateInfo
 import com.bgoom.app.util.BatteryOptimizationHelper
@@ -209,54 +208,44 @@ fun SettingsScreen(
                         },
                     )
                 }
-                val overlayOk = remember(permRefreshTick) { DynamicCapsuleOverlay.canDrawOverlays(context) }
+                val promotedOk = remember(permRefreshTick) { BgoomNotifier.canPostPromotedNotifications(context) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("收到文件弹出顶栏灵动胶囊", style = MaterialTheme.typography.bodyLarge)
+                        Text("系统级实况胶囊（Android 16）", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (overlayOk) "已授权悬浮窗：收到电脑文件/便签时在顶部居中弹出灵动胶囊，点击直接打开"
-                            else "需开启「悬浮窗 / 显示在其他应用上层」权限才能在全系统任意界面弹出胶囊",
+                            when {
+                                Build.VERSION.SDK_INT < 36 ->
+                                    "当前 Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}），系统原生实况胶囊需 Android 16+，现使用系统高优横幅通知"
+                                promotedOk ->
+                                    "已获系统实况通知授权（API ${Build.VERSION.SDK_INT}），收到文件/便签自动由系统弹出实况胶囊"
+                                else ->
+                                    "未获系统实况通知授权（API ${Build.VERSION.SDK_INT}），需在系统设置里开启「实况通知 / 实时更新」权限"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
-                        checked = settings.enableFloatingCapsule,
-                        onCheckedChange = { checked ->
-                            deviceStore.updateSettings { it.copy(enableFloatingCapsule = checked) }
-                            if (checked && !overlayOk) {
-                                DynamicCapsuleOverlay.requestOverlayPermission(context)
-                            }
-                        },
-                    )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilledTonalButton(
-                        onClick = {
-                            if (overlayOk) {
-                                DynamicCapsuleOverlay.showTestDemo(context)
-                            } else {
-                                DynamicCapsuleOverlay.requestOverlayPermission(context)
-                            }
-                        },
-                        shape = RoundedCornerShape(18.dp),
+                if (Build.VERSION.SDK_INT >= 36) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(if (overlayOk) "试弹灵动胶囊" else "去授权悬浮窗")
-                    }
-                    if (Build.VERSION.SDK_INT >= 36) {
-                        val promotedOk = remember(permRefreshTick) { BgoomNotifier.canPostPromotedNotifications(context) }
                         FilledTonalButton(
                             onClick = { BgoomNotifier.openPromotedNotificationSettings(context) },
                             shape = RoundedCornerShape(18.dp),
                         ) {
-                            Text(if (promotedOk) "系统实况胶囊已开" else "开启系统实况胶囊")
+                            Text(if (promotedOk) "系统实况已开启" else "去开启系统实况胶囊")
+                        }
+                        FilledTonalButton(
+                            onClick = { onShowToast(BgoomNotifier.postTestSystemCapsule(context)) },
+                            shape = RoundedCornerShape(18.dp),
+                        ) {
+                            Text("测试系统胶囊")
                         }
                     }
                 }

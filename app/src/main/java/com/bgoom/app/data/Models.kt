@@ -68,7 +68,6 @@ data class AppSettings(
     val notifyDesktopOnSend: Boolean = true,
     val autoCopyIncomingText: Boolean = true,
     val keepAliveReceiveEnabled: Boolean = false,
-    val enableFloatingCapsule: Boolean = true,
     val githubRepo: String = "smartThise/bgoom",
     val githubMirrorPrefix: String = "",
 )

@@ -65,7 +65,6 @@ import com.bgoom.app.data.BgoomDatabase
 import com.bgoom.app.data.RemoteEntry
 import com.bgoom.app.data.SshDevice
 import com.bgoom.app.notify.BgoomNotifier
-import com.bgoom.app.notify.DynamicCapsuleOverlay
 import com.bgoom.app.ssh.BgoomSyncService
 import com.bgoom.app.ssh.SshHubRepository
 import com.bgoom.app.util.AndroidFileHelper
@@ -245,7 +244,7 @@ fun TransferHubScreen(
         // Live Receive Capsule & Background Keep-Alive Toggle Card
         item {
             val batteryExempt = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
-            val overlayGranted = DynamicCapsuleOverlay.canDrawOverlays(context)
+            val needsPromotedPerm = Build.VERSION.SDK_INT >= 36 && !BgoomNotifier.canPostPromotedNotifications(context)
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = if (syncRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
@@ -273,7 +272,7 @@ fun TransferHubScreen(
                         }
                         Switch(checked = syncRunning, onCheckedChange = ::toggleLiveReceive)
                     }
-                    if (syncRunning && !overlayGranted) {
+                    if (syncRunning && needsPromotedPerm) {
                         Spacer(Modifier.height(6.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -281,13 +280,13 @@ fun TransferHubScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "开启悬浮窗权限后，收到电脑文件将弹出顶栏灵动胶囊",
+                                "开启 Android 16 系统实况通知权限后，收件自动弹系统胶囊",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = { DynamicCapsuleOverlay.requestOverlayPermission(context) }) {
-                                Text("开启灵动胶囊")
+                            TextButton(onClick = { BgoomNotifier.openPromotedNotificationSettings(context) }) {
+                                Text("去开启实况")
                             }
                         }
                     }
