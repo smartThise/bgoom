@@ -138,7 +138,7 @@ class SshHubRepository(
                             client = client,
                             platform = device.platform,
                             title = "大爆 BGOOM · 收到手机文件",
-                            body = "$cleanName（点击直接打开）",
+                            body = "$cleanName · 点击直接打开",
                             filePath = finalRemotePath,
                         )
                     }
@@ -657,7 +657,7 @@ class SshHubRepository(
 
             DevicePlatform.LINUX -> {
                 if (filePath.isNotBlank()) {
-                    "(command -v notify-send >/dev/null && (act=\$(notify-send -u normal --action='open=打开文件' '$safeTitle' '$safeBody' 2>/dev/null); [ \"\$act\" = 'open' ] && xdg-open '$safePath' >/dev/null 2>&1)) >/dev/null 2>&1 &"
+                    "(command -v notify-send >/dev/null && (act=\$(notify-send -u normal --action='default=直接打开' --action='folder=打开文件夹' '$safeTitle' '$safeBody' 2>/dev/null); if [ \"\$act\" = 'folder' ]; then xdg-open \"\$(dirname '$safePath')\" >/dev/null 2>&1; elif [ \"\$act\" = 'default' ]; then xdg-open '$safePath' >/dev/null 2>&1; fi)) >/dev/null 2>&1 &"
                 } else {
                     "command -v notify-send >/dev/null && notify-send '$safeTitle' '$safeBody' >/dev/null 2>&1 &"
                 }
@@ -667,13 +667,23 @@ class SshHubRepository(
                 if (filePath.isNotBlank()) {
                     "WINP=\$(wslpath -w '$safePath' 2>/dev/null || echo ''); " +
                         "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -WindowStyle Hidden -Command \"" +
+                        "\$p='\$WINP'; \$t='$safeTitle'; \$b='$safeBody'; " +
+                        "try { " +
+                        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; " +
+                        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null; " +
+                        "\$esc = { param(\$s) [System.Security.SecurityElement]::Escape(\$s) }; " +
+                        "\$fUri = & \$esc ([System.Uri]\$p).AbsoluteUri; " +
+                        "\$dUri = & \$esc ([System.Uri](Split-Path -Parent \$p)).AbsoluteUri; " +
+                        "\$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; " +
+                        "\$xml.LoadXml('<toast launch=\\\"' + \$fUri + '\\\" activationType=\\\"protocol\\\"><visual><binding template=\\\"ToastGeneric\\\"><text>' + (& \$esc \$t) + '</text><text>' + (& \$esc \$b) + '</text></binding></visual><actions><action content=\\\"打开文件夹\\\" arguments=\\\"' + \$dUri + '\\\" activationType=\\\"protocol\\\"/></actions></toast>'); " +
+                        "\$toast = New-Object Windows.UI.Notifications.ToastNotification \$xml; " +
+                        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show(\$toast); " +
+                        "} catch { " +
                         "Add-Type -AssemblyName System.Windows.Forms; " +
-                        "\$p='\$WINP'; " +
-                        "\$n=New-Object System.Windows.Forms.NotifyIcon; " +
-                        "\$n.Icon=[System.Drawing.SystemIcons]::Information; \$n.Visible=\$true; " +
+                        "\$n=New-Object System.Windows.Forms.NotifyIcon; \$n.Icon=[System.Drawing.SystemIcons]::Information; \$n.Visible=\$true; " +
                         "if(\$p){ \$n.add_BalloonTipClicked({ try{ Start-Process \$p }catch{} }); }; " +
-                        "\$n.ShowBalloonTip(8000,'$safeTitle','$safeBody',[System.Windows.Forms.ToolTipIcon]::Info); " +
-                        "Start-Sleep -Seconds 10; \$n.Dispose()\" >/dev/null 2>&1 &"
+                        "\$n.ShowBalloonTip(8000,\$t,\$b,[System.Windows.Forms.ToolTipIcon]::Info); Start-Sleep -Seconds 10; \$n.Dispose() " +
+                        "}\" >/dev/null 2>&1 &"
                 } else {
                     "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -WindowStyle Hidden -Command \"" +
                         "Add-Type -AssemblyName System.Windows.Forms; " +

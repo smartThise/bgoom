@@ -25,9 +25,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,10 +40,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bgoom.app.BuildConfig
 import com.bgoom.app.data.DeviceStore
 import com.bgoom.app.data.ThemeMode
 import com.bgoom.app.data.TypstCompileMode
+import com.bgoom.app.notify.BgoomNotifier
+import com.bgoom.app.notify.DynamicCapsuleOverlay
 import com.bgoom.app.update.GitHubUpdater
 import com.bgoom.app.update.ReleaseUpdateInfo
 import com.bgoom.app.util.BatteryOptimizationHelper
@@ -54,7 +62,18 @@ fun SettingsScreen(
 ) {
     val settings by deviceStore.settings.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+
+    // Re-check system permissions (overlay / battery / Android 16 live updates) when returning from Settings
+    var permRefreshTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) permRefreshTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     var baseUrl by remember(settings.visionApiBaseUrl) { mutableStateOf(settings.visionApiBaseUrl) }
     var modelName by remember(settings.visionApiModel) { mutableStateOf(settings.visionApiModel) }
@@ -190,7 +209,58 @@ fun SettingsScreen(
                         },
                     )
                 }
-                val batteryOk = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                val overlayOk = remember(permRefreshTick) { DynamicCapsuleOverlay.canDrawOverlays(context) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("收到文件弹出顶栏灵动胶囊", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (overlayOk) "已授权悬浮窗：收到电脑文件/便签时在顶部居中弹出灵动胶囊，点击直接打开"
+                            else "需开启「悬浮窗 / 显示在其他应用上层」权限才能在全系统任意界面弹出胶囊",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = settings.enableFloatingCapsule,
+                        onCheckedChange = { checked ->
+                            deviceStore.updateSettings { it.copy(enableFloatingCapsule = checked) }
+                            if (checked && !overlayOk) {
+                                DynamicCapsuleOverlay.requestOverlayPermission(context)
+                            }
+                        },
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            if (overlayOk) {
+                                DynamicCapsuleOverlay.showTestDemo(context)
+                            } else {
+                                DynamicCapsuleOverlay.requestOverlayPermission(context)
+                            }
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        Text(if (overlayOk) "试弹灵动胶囊" else "去授权悬浮窗")
+                    }
+                    if (Build.VERSION.SDK_INT >= 36) {
+                        val promotedOk = remember(permRefreshTick) { BgoomNotifier.canPostPromotedNotifications(context) }
+                        FilledTonalButton(
+                            onClick = { BgoomNotifier.openPromotedNotificationSettings(context) },
+                            shape = RoundedCornerShape(18.dp),
+                        ) {
+                            Text(if (promotedOk) "系统实况胶囊已开" else "开启系统实况胶囊")
+                        }
+                    }
+                }
+                val batteryOk = remember(permRefreshTick) { BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

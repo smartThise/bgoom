@@ -65,6 +65,7 @@ import com.bgoom.app.data.BgoomDatabase
 import com.bgoom.app.data.RemoteEntry
 import com.bgoom.app.data.SshDevice
 import com.bgoom.app.notify.BgoomNotifier
+import com.bgoom.app.notify.DynamicCapsuleOverlay
 import com.bgoom.app.ssh.BgoomSyncService
 import com.bgoom.app.ssh.SshHubRepository
 import com.bgoom.app.util.AndroidFileHelper
@@ -244,6 +245,7 @@ fun TransferHubScreen(
         // Live Receive Capsule & Background Keep-Alive Toggle Card
         item {
             val batteryExempt = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+            val overlayGranted = DynamicCapsuleOverlay.canDrawOverlays(context)
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = if (syncRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
@@ -271,8 +273,26 @@ fun TransferHubScreen(
                         }
                         Switch(checked = syncRunning, onCheckedChange = ::toggleLiveReceive)
                     }
+                    if (syncRunning && !overlayGranted) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "开启悬浮窗权限后，收到电脑文件将弹出顶栏灵动胶囊",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { DynamicCapsuleOverlay.requestOverlayPermission(context) }) {
+                                Text("开启灵动胶囊")
+                            }
+                        }
+                    }
                     if (syncRunning && !batteryExempt) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,

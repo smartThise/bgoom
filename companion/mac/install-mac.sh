@@ -30,11 +30,13 @@ if command -v swiftc >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/BgoomNotify.swift" ]; 
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.1</string>
+	<string>1.1.3</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>5</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSUserNotificationAlertStyle</key>
+	<string>alert</string>
 </dict>
 </plist>
 EOF

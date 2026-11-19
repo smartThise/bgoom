@@ -48,8 +48,10 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         val action = intent.action ?: return
 
-        // Direct open file when user taps an incoming file notification
+        // Direct open file when user taps an incoming file notification or Dynamic Capsule
         if (action == ACTION_OPEN_RECEIVED_FILE) {
+            BgoomNotifier.cancelTransferCapsule(this)
+            com.bgoom.app.notify.DynamicCapsuleOverlay.dismiss(this)
             val uriStr = intent.getStringExtra(EXTRA_OPEN_FILE_URI).orEmpty()
             val mime = intent.getStringExtra(EXTRA_OPEN_FILE_MIME).orEmpty()
             val name = intent.getStringExtra(EXTRA_OPEN_FILE_NAME).orEmpty()
@@ -66,6 +68,8 @@ class MainActivity : ComponentActivity() {
         }
 
         if (action == ACTION_OPEN_NOTES) {
+            BgoomNotifier.cancelTransferCapsule(this)
+            com.bgoom.app.notify.DynamicCapsuleOverlay.dismiss(this)
             requestedRouteState.value = BgoomRoute.NOTES
             return
         }

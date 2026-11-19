@@ -16,7 +16,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,19 +65,24 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -522,9 +529,24 @@ private fun QuadCropEditor(
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var activeCorner by remember { mutableIntStateOf(-1) }
     val primaryColor = MaterialTheme.colorScheme.primary
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+    val latestQuad by rememberUpdatedState(quad)
+    val latestOnQuadChanged by rememberUpdatedState(onQuadChanged)
+
+    fun computeFitRect(outer: IntSize, bmpW: Int, bmpH: Int, marginPx: Float): Rect {
+        val availW = (outer.width - 2f * marginPx).coerceAtLeast(1f)
+        val availH = (outer.height - 2f * marginPx).coerceAtLeast(1f)
+        val bmpAspect = bmpW.toFloat() / bmpH.coerceAtLeast(1).toFloat()
+        val boxAspect = availW / availH
+        val imgW = if (bmpAspect > boxAspect) availW else availH * bmpAspect
+        val imgH = if (bmpAspect > boxAspect) availW / bmpAspect else availH
+        val left = (outer.width - imgW) / 2f
+        val top = (outer.height - imgH) / 2f
+        return Rect(left, top, left + imgW, top + imgH)
+    }
 
     Column(
         modifier = Modifier
@@ -538,7 +560,7 @@ private fun QuadCropEditor(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                if (confident) "已自动识别纸张四角（可拖动微调）" else "拖动四角对齐纸张边缘",
+                if (confident) "已自动识别纸张四角（按住圆点自由拖动）" else "按住四个圆点对齐纸张边缘",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -554,69 +576,134 @@ private fun QuadCropEditor(
                 .fillMaxWidth()
                 .weight(1f)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black),
+                .background(Color(0xFF10131A))
+                .onSizeChanged { containerSize = it }
+                // Key strictly on `bitmap`, NEVER on `quad`, so updating corners mid-drag never cancels gestures!
+                .pointerInput(bitmap) {
+                    val marginPx = 22.dp.toPx()
+                    val hitRadiusPx = 64.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val rect = computeFitRect(containerSize, bitmap.width, bitmap.height, marginPx)
+                        if (rect.width <= 1f || rect.height <= 1f) return@awaitEachGesture
+
+                        val startQuad = latestQuad
+                        var bestIdx = -1
+                        var bestDist = hitRadiusPx
+                        startQuad.forEachIndexed { idx, p ->
+                            val px = rect.left + p.x * rect.width
+                            val py = rect.top + p.y * rect.height
+                            val d = hypot(down.position.x - px, down.position.y - py)
+                            if (d < bestDist) {
+                                bestDist = d
+                                bestIdx = idx
+                            }
+                        }
+                        if (bestIdx !in 0..3) return@awaitEachGesture
+
+                        activeCorner = bestIdx
+                        down.consume()
+                        val startPt = startQuad[bestIdx]
+                        var accDx = 0f
+                        var accDy = 0f
+                        try {
+                            drag(down.id) { change ->
+                                val delta = change.positionChange()
+                                if (delta != Offset.Zero) {
+                                    change.consume()
+                                    accDx += delta.x
+                                    accDy += delta.y
+                                    val updated = latestQuad.toMutableList()
+                                    updated[bestIdx] = NormPoint(
+                                        x = (startPt.x + accDx / rect.width).coerceIn(0f, 1f),
+                                        y = (startPt.y + accDy / rect.height).coerceIn(0f, 1f),
+                                    )
+                                    latestOnQuadChanged(updated)
+                                }
+                            }
+                        } finally {
+                            activeCorner = -1
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
-            Box(
+            Image(
+                bitmap = imageBitmap,
+                contentDescription = "待校正文档",
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
-                    .aspectRatio(bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat())
-                    .onSizeChanged { boxSize = it }
-                    .pointerInput(quad) {
-                        detectDragGestures(
-                            onDragStart = { pos ->
-                                if (boxSize.width <= 0 || boxSize.height <= 0) return@detectDragGestures
-                                val w = boxSize.width.toFloat()
-                                val h = boxSize.height.toFloat()
-                                var bestIdx = -1
-                                var bestDist = 96f
-                                quad.forEachIndexed { idx, p ->
-                                    val d = hypot(pos.x - p.x * w, pos.y - p.y * h)
-                                    if (d < bestDist) {
-                                        bestDist = d
-                                        bestIdx = idx
-                                    }
-                                }
-                                activeCorner = bestIdx
-                            },
-                            onDragEnd = { activeCorner = -1 },
-                            onDragCancel = { activeCorner = -1 },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val idx = activeCorner
-                                if (idx in 0..3 && boxSize.width > 0 && boxSize.height > 0) {
-                                    val updated = quad.toMutableList()
-                                    val cur = updated[idx]
-                                    updated[idx] = NormPoint(
-                                        x = (cur.x + dragAmount.x / boxSize.width).coerceIn(0f, 1f),
-                                        y = (cur.y + dragAmount.y / boxSize.height).coerceIn(0f, 1f),
-                                    )
-                                    onQuadChanged(updated)
-                                }
-                            },
-                        )
-                    }
-            ) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "待校正文档",
-                    contentScale = ContentScale.FillBounds,
-                    modifier = Modifier.fillMaxSize(),
+                    .fillMaxSize()
+                    .padding(22.dp),
+            )
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val marginPx = 22.dp.toPx()
+                val rect = computeFitRect(
+                    IntSize(size.width.toInt(), size.height.toInt()),
+                    bitmap.width,
+                    bitmap.height,
+                    marginPx,
                 )
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val pts = quad.map { Offset(it.x * size.width, it.y * size.height) }
-                    val path = Path().apply {
-                        moveTo(pts[0].x, pts[0].y)
-                        lineTo(pts[1].x, pts[1].y)
-                        lineTo(pts[2].x, pts[2].y)
-                        lineTo(pts[3].x, pts[3].y)
-                        close()
+                if (rect.width <= 1f || rect.height <= 1f) return@Canvas
+
+                val pts = quad.map { Offset(rect.left + it.x * rect.width, rect.top + it.y * rect.height) }
+                val path = Path().apply {
+                    moveTo(pts[0].x, pts[0].y)
+                    lineTo(pts[1].x, pts[1].y)
+                    lineTo(pts[2].x, pts[2].y)
+                    lineTo(pts[3].x, pts[3].y)
+                    close()
+                }
+                drawPath(path, color = primaryColor.copy(alpha = 0.14f))
+                drawPath(path, color = primaryColor, style = Stroke(width = 2.5.dp.toPx()))
+                pts.forEachIndexed { idx, p ->
+                    val isDragging = idx == activeCorner
+                    if (isDragging) {
+                        drawCircle(primaryColor.copy(alpha = 0.28f), radius = 26.dp.toPx(), center = p)
                     }
-                    drawPath(path, color = primaryColor.copy(alpha = 0.14f))
-                    drawPath(path, color = primaryColor, style = Stroke(width = 2.5.dp.toPx()))
-                    pts.forEach { p ->
-                        drawCircle(Color.White, radius = 12.dp.toPx(), center = p)
-                        drawCircle(primaryColor, radius = 9.dp.toPx(), center = p)
+                    drawCircle(Color.White, radius = (if (isDragging) 15.dp else 13.dp).toPx(), center = p)
+                    drawCircle(primaryColor, radius = (if (isDragging) 11.dp else 9.5.dp).toPx(), center = p)
+                }
+
+                // Precision 2.2x magnifier loupe while dragging a corner so the finger never obscures paper edges
+                if (activeCorner in 0..3) {
+                    val activePt = quad[activeCorner]
+                    val loupeRadius = 46.dp.toPx()
+                    val pad = 14.dp.toPx()
+                    // Automatically dodge to opposite top corner from dragged point
+                    val cx = if (activePt.x < 0.5f) size.width - loupeRadius - pad else loupeRadius + pad
+                    val cy = loupeRadius + pad
+                    val loupeRect = Rect(cx - loupeRadius, cy - loupeRadius, cx + loupeRadius, cy + loupeRadius)
+                    val loupePath = Path().apply { addOval(loupeRect) }
+
+                    val sampleHalfW = (bitmap.width * 0.08f).toInt().coerceAtLeast(36)
+                    val sampleHalfH = sampleHalfW
+                    val centerBx = (activePt.x * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+                    val centerBy = (activePt.y * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+                    val srcL = (centerBx - sampleHalfW).coerceIn(0, (bitmap.width - 2).coerceAtLeast(0))
+                    val srcT = (centerBy - sampleHalfH).coerceIn(0, (bitmap.height - 2).coerceAtLeast(0))
+                    val srcW = (sampleHalfW * 2).coerceAtMost(bitmap.width - srcL).coerceAtLeast(1)
+                    val srcH = (sampleHalfH * 2).coerceAtMost(bitmap.height - srcT).coerceAtLeast(1)
+
+                    clipPath(loupePath) {
+                        drawRect(Color.Black, topLeft = Offset(loupeRect.left, loupeRect.top), size = loupeRect.size)
+                        drawImage(
+                            image = imageBitmap,
+                            srcOffset = IntOffset(srcL, srcT),
+                            srcSize = IntSize(srcW, srcH),
+                            dstOffset = IntOffset(loupeRect.left.toInt(), loupeRect.top.toInt()),
+                            dstSize = IntSize(loupeRect.width.toInt(), loupeRect.height.toInt()),
+                        )
+                        // Center crosshair showing exact mapped point
+                        val relX = (centerBx - srcL).toFloat() / srcW.toFloat()
+                        val relY = (centerBy - srcT).toFloat() / srcH.toFloat()
+                        val lx = loupeRect.left + relX * loupeRect.width
+                        val ly = loupeRect.top + relY * loupeRect.height
+                        val cross = 10.dp.toPx()
+                        drawLine(primaryColor, Offset(lx - cross, ly), Offset(lx + cross, ly), 2.dp.toPx())
+                        drawLine(primaryColor, Offset(lx, ly - cross), Offset(lx, ly + cross), 2.dp.toPx())
                     }
+                    drawCircle(Color.White, radius = loupeRadius, center = Offset(cx, cy), style = Stroke(width = 2.5.dp.toPx()))
                 }
             }
         }
