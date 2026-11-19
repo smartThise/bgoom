@@ -62,6 +62,7 @@ import com.bgoom.app.ssh.SshHubRepository
 import com.bgoom.app.ui.BgoomRoute
 import com.bgoom.app.update.ReleaseUpdateInfo
 import com.bgoom.app.util.AndroidFileHelper
+import com.bgoom.app.util.BatteryOptimizationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -298,7 +299,13 @@ fun HomeHubScreen(
                                     notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 } else {
                                     BgoomSyncService.start(context)
-                                    onShowActionToast("已开启实时接收 · 状态栏胶囊就绪", null, null)
+                                    if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
+                                        onShowActionToast("已开启后台常驻，建议设为免电池优化防杀后台", "防杀后台") {
+                                            BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
+                                        }
+                                    } else {
+                                        onShowActionToast("已开启后台常驻 · 无需打开 App 也能收件", null, null)
+                                    }
                                 }
                             },
                             modifier = Modifier.weight(1f),

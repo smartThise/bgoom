@@ -123,6 +123,8 @@ fun BgoomRoot(
     app: BgoomApp,
     incomingShare: IncomingSharePayload?,
     onClearIncomingShare: () -> Unit,
+    requestedRoute: BgoomRoute? = null,
+    onConsumeRequestedRoute: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -134,6 +136,12 @@ fun BgoomRoot(
     }
 
     var currentRoute by remember { mutableStateOf(BgoomRoute.HOME) }
+    LaunchedEffect(requestedRoute) {
+        if (requestedRoute != null) {
+            currentRoute = requestedRoute
+            onConsumeRequestedRoute()
+        }
+    }
     var pendingOcrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var pendingScanBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var pendingIdPhotoBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -606,13 +614,14 @@ fun BgoomRoot(
                             Text(if (chosenDevice != null) "直接发送到 ${chosenDevice.name}" else "前往添加电脑设备")
                         }
 
-                        if (isImage && singleUri != null) {
+                        if (isImage) {
+                            val imgUri = singleUri!!
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FilledTonalButton(
                                     onClick = {
                                         onClearIncomingShare()
                                         scope.launch {
-                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, singleUri, 2400) }
+                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, imgUri, 2400) }
                                             if (bmp != null) {
                                                 pendingScanBitmap = bmp
                                                 currentRoute = BgoomRoute.SCANNER
@@ -627,7 +636,7 @@ fun BgoomRoot(
                                     onClick = {
                                         onClearIncomingShare()
                                         scope.launch {
-                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, singleUri, 2000) }
+                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, imgUri, 2000) }
                                             if (bmp != null) {
                                                 pendingOcrBitmap = bmp
                                                 currentRoute = BgoomRoute.OCR_TYPST
@@ -642,7 +651,7 @@ fun BgoomRoot(
                                     onClick = {
                                         onClearIncomingShare()
                                         scope.launch {
-                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, singleUri, 1800) }
+                                            val bmp = withContext(Dispatchers.IO) { BitmapIO.loadBitmapOriented(context, imgUri, 1800) }
                                             if (bmp != null) {
                                                 pendingIdPhotoBitmap = bmp
                                                 currentRoute = BgoomRoute.ID_PHOTO

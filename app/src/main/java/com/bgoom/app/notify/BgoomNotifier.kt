@@ -154,14 +154,19 @@ object BgoomNotifier {
         ensureChannels(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(contentUri, mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Route tap through MainActivity trampoline so EVERY file type (PDF/Image/Office/MD/ZIP)
+        // reliably opens directly via ACTION_VIEW with automatic chooser fallback.
+        val openViaTrampoline = Intent(context, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_OPEN_RECEIVED_FILE
+            putExtra(MainActivity.EXTRA_OPEN_FILE_URI, contentUri.toString())
+            putExtra(MainActivity.EXTRA_OPEN_FILE_MIME, mimeType)
+            putExtra(MainActivity.EXTRA_OPEN_FILE_NAME, fileName)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
         }
         val openFilePi = PendingIntent.getActivity(
             context,
             ++alertSeq,
-            viewIntent,
+            openViaTrampoline,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -203,7 +208,15 @@ object BgoomNotifier {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val openApp = pendingOpenApp(context)
+        val openNotesPi = PendingIntent.getActivity(
+            context,
+            ++alertSeq,
+            Intent(context, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_OPEN_NOTES
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val suffix = if (copiedToClipboard) "（已同步到剪贴板）" else ""
 
         val notif = if (Build.VERSION.SDK_INT >= 36) {
@@ -213,7 +226,7 @@ object BgoomNotifier {
                 .setContentText(preview.take(120))
                 .setStyle(Notification.BigTextStyle().bigText(preview.take(500)))
                 .setAutoCancel(true)
-                .setContentIntent(openApp)
+                .setContentIntent(openNotesPi)
                 .addExtras(promotedExtras())
                 .setShortCriticalText("收到便签")
                 .build()
@@ -224,7 +237,7 @@ object BgoomNotifier {
                 .setContentText(preview.take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(preview.take(500)))
                 .setAutoCancel(true)
-                .setContentIntent(openApp)
+                .setContentIntent(openNotesPi)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .build()

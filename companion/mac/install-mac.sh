@@ -7,7 +7,41 @@ SERVICES_DIR="$HOME/Library/Services"
 
 mkdir -p "$BIN_DIR" "$SERVICES_DIR" "$HOME/BgoomDrop/outbox/files" "$HOME/BgoomDrop/outbox/events" "$HOME/BgoomDrop/notes"
 cp "$SCRIPT_DIR/bgoom-send" "$BIN_DIR/bgoom-send"
-chmod +x "$BIN_DIR/bgoom-send"
+cp "$SCRIPT_DIR/bgoom-notify" "$BIN_DIR/bgoom-notify"
+chmod +x "$BIN_DIR/bgoom-send" "$BIN_DIR/bgoom-notify"
+
+# Build ultra-lightweight clickable macOS Notification helper (BgoomNotify.app, LSUIElement=true, zero idle RAM)
+NOTIFY_APP="$HOME/Library/Application Support/BGOOM/BgoomNotify.app"
+if command -v swiftc >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/BgoomNotify.swift" ]; then
+    mkdir -p "$NOTIFY_APP/Contents/MacOS"
+    cat > "$NOTIFY_APP/Contents/Info.plist" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>BgoomNotify</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.bgoom.notify</string>
+	<key>CFBundleName</key>
+	<string>大爆 BGOOM</string>
+	<key>CFBundleDisplayName</key>
+	<string>大爆 BGOOM</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.1.1</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>
+EOF
+    swiftc -O "$SCRIPT_DIR/BgoomNotify.swift" -o "$NOTIFY_APP/Contents/MacOS/BgoomNotify"
+    codesign --force --deep --sign - "$NOTIFY_APP" >/dev/null 2>&1 || true
+    echo "✅ 已编译可点击打开文件的原生通知组件: $NOTIFY_APP"
+fi
 
 # 1. Install Finder Quick Action: "发送到大爆手机" (Files & Folders)
 FILE_WF="$SERVICES_DIR/发送到大爆手机.workflow/Contents"

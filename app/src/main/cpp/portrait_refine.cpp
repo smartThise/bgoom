@@ -359,10 +359,14 @@ PortraitBbox refinePortraitMatteInPlace(
                 b = lift(b);
             }
 
-            rgba[4 * i + 0] = clampByte(r);
-            rgba[4 * i + 1] = clampByte(g);
-            rgba[4 * i + 2] = clampByte(b);
-            rgba[4 * i + 3] = clampByte(a * 255.0f);
+            // Android ARGB_8888 Bitmap memory (via AndroidBitmap_lockPixels) uses premultiplied alpha.
+            // Premultiply cleaned foreground RGB by alpha so Skia SRC_OVER composites cleanly onto any ID background.
+            uint8_t aByte = clampByte(a * 255.0f);
+            float aNorm = static_cast<float>(aByte) / 255.0f;
+            rgba[4 * i + 0] = clampByte(r * aNorm);
+            rgba[4 * i + 1] = clampByte(g * aNorm);
+            rgba[4 * i + 2] = clampByte(b * aNorm);
+            rgba[4 * i + 3] = aByte;
 
             if (a > 0.55f) {
                 if (x < minX) minX = x;

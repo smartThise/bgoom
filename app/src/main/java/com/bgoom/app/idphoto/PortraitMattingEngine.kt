@@ -80,6 +80,9 @@ class PortraitMattingEngine(private val context: Context) {
 
             // Work at crisp 1400px max side (fast guided filter & plenty sharp for 300DPI ID photos)
             val work = downscaleMutableArgb(source, 1400)
+            // Crucial: JPEG-decoded Bitmaps default to hasAlpha=false; must enable alpha + premultiplied for Skia compositing
+            work.setHasAlpha(true)
+            work.isPremultiplied = true
             val w = work.width
             val h = work.height
 

@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.bgoom.app.BuildConfig
@@ -42,6 +43,7 @@ import com.bgoom.app.data.ThemeMode
 import com.bgoom.app.data.TypstCompileMode
 import com.bgoom.app.update.GitHubUpdater
 import com.bgoom.app.update.ReleaseUpdateInfo
+import com.bgoom.app.util.BatteryOptimizationHelper
 import kotlinx.coroutines.launch
 
 @Composable
@@ -51,6 +53,7 @@ fun SettingsScreen(
     onShowToast: (String) -> Unit,
 ) {
     val settings by deviceStore.settings.collectAsState()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var baseUrl by remember(settings.visionApiBaseUrl) { mutableStateOf(settings.visionApiBaseUrl) }
@@ -183,6 +186,28 @@ fun SettingsScreen(
                             deviceStore.updateSettings { it.copy(autoCopyIncomingText = checked) }
                         },
                     )
+                }
+                val batteryOk = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("后台常驻防休眠白名单", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (batteryOk) "已允许忽略电池优化（配合系统「应用启动管理→手动管理」更稳）"
+                            else "未加入白名单：荣耀等系统息屏后可能断开后台收件",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) },
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        Text(if (batteryOk) "已开启" else "去开启")
+                    }
                 }
             }
         }

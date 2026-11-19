@@ -49,6 +49,11 @@ class BgoomApp : Application() {
         localFormulaEngine = LocalTexoFormulaEngine(this)
         remoteVlmClient = RemoteVlmOcrClient()
         typstCompiler = TypstCompilerService(this, sshRepo)
+
+        // Auto-resume background persistence if user previously enabled it
+        if (deviceStore.settings.value.keepAliveReceiveEnabled && deviceStore.getActiveDevice() != null) {
+            runCatching { com.bgoom.app.ssh.BgoomSyncService.start(this) }
+        }
     }
 
     override fun onTerminate() {

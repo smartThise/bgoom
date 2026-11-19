@@ -138,7 +138,8 @@ class SshHubRepository(
                             client = client,
                             platform = device.platform,
                             title = "大爆 BGOOM · 收到手机文件",
-                            body = "$cleanName（已存入 ${targetDirRaw}）",
+                            body = "$cleanName（点击直接打开）",
+                            filePath = finalRemotePath,
                         )
                     }
                 }
@@ -395,7 +396,8 @@ class SshHubRepository(
                         sendDesktopNotification(
                             dstClient, targetDevice.platform,
                             "大爆 BGOOM · 跨设备中转",
-                            "收到来自 ${sourceDevice.name} 的文件：$fileName"
+                            "收到来自 ${sourceDevice.name} 的文件：$fileName（点击打开）",
+                            filePath = destPath,
                         )
                     }
                 }
@@ -443,11 +445,13 @@ class SshHubRepository(
             val safeTitle = sanitizeFileName(note.title.ifBlank { "note" }).take(32)
             val fileName = "${safeTitle}_${shortId}.md"
 
+            var syncedRemotePath = ""
             pool.withClient(device) { client, _ ->
                 client.newSFTPClient().use { sftp ->
                     val dir = resolveRemotePath(sftp, device.remoteNotesDir)
                     ensureRemoteDir(sftp, dir)
                     val target = joinRemote(dir, fileName)
+                    syncedRemotePath = target
                     writeRemoteBytes(sftp, target, mdContent)
                 }
                 if (notifyDesktop) {
@@ -455,7 +459,8 @@ class SshHubRepository(
                         sendDesktopNotification(
                             client, device.platform,
                             "大爆 BGOOM · 收到手机便签",
-                            note.title.ifBlank { note.content.take(48) }
+                            "${note.title.ifBlank { note.content.take(40) }}（点击打开）",
+                            filePath = syncedRemotePath,
                         )
                     }
                 }
@@ -620,27 +625,72 @@ class SshHubRepository(
     }
 
     /**
-     * Zero-daemon native desktop notification executed right over the existing SSH session.
+     * Native desktop notification over existing SSH session.
+     * Supports direct click-to-open file on macOS (via BgoomNotify.app / terminal-notifier),
+     * Windows/WSL (via PowerShell NotifyIcon BalloonTipClicked -> Start-Process),
+     * and Linux (via notify-send --action -> xdg-open).
      */
     private fun sendDesktopNotification(
         client: SSHClient,
         platform: DevicePlatform,
         title: String,
         body: String,
+        filePath: String = "",
     ) {
         val safeTitle = escapeSingleLine(title).take(60)
         val safeBody = escapeSingleLine(body).take(140)
+        val safePath = escapeShellSingleQuoted(filePath)
         val cmd = when (platform) {
-            DevicePlatform.MACOS ->
-                "osascript -e 'display notification \"$safeBody\" with title \"$safeTitle\" sound name \"Glass\"' >/dev/null 2>&1 &"
-            DevicePlatform.LINUX ->
-                "command -v notify-send >/dev/null && notify-send '$safeTitle' '$safeBody' >/dev/null 2>&1 &"
-            DevicePlatform.WINDOWS_WSL ->
-                "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command \"Add-Type -AssemblyName System.Windows.Forms; \$n=New-Object System.Windows.Forms.NotifyIcon; \$n.Icon=[System.Drawing.SystemIcons]::Information; \$n.Visible=\$true; \$n.ShowBalloonTip(4000,'$safeTitle','$safeBody',[System.Windows.Forms.ToolTipIcon]::Info)\" >/dev/null 2>&1 &"
+            DevicePlatform.MACOS -> {
+                if (filePath.isNotBlank()) {
+                    "if [ -x \"\$HOME/.local/bin/bgoom-notify\" ]; then " +
+                        "\"\$HOME/.local/bin/bgoom-notify\" '$safeTitle' '$safeBody' '$safePath' >/dev/null 2>&1 & " +
+                        "elif command -v terminal-notifier >/dev/null 2>&1; then " +
+                        "terminal-notifier -title '$safeTitle' -message '$safeBody' -execute \"open '$safePath'\" -sound Glass >/dev/null 2>&1 & " +
+                        "else osascript -e 'display notification \"$safeBody\" with title \"$safeTitle\" sound name \"Glass\"' >/dev/null 2>&1 & fi"
+                } else {
+                    "if [ -x \"\$HOME/.local/bin/bgoom-notify\" ]; then " +
+                        "\"\$HOME/.local/bin/bgoom-notify\" '$safeTitle' '$safeBody' >/dev/null 2>&1 & " +
+                        "else osascript -e 'display notification \"$safeBody\" with title \"$safeTitle\" sound name \"Glass\"' >/dev/null 2>&1 & fi"
+                }
+            }
+
+            DevicePlatform.LINUX -> {
+                if (filePath.isNotBlank()) {
+                    "(command -v notify-send >/dev/null && (act=\$(notify-send -u normal --action='open=打开文件' '$safeTitle' '$safeBody' 2>/dev/null); [ \"\$act\" = 'open' ] && xdg-open '$safePath' >/dev/null 2>&1)) >/dev/null 2>&1 &"
+                } else {
+                    "command -v notify-send >/dev/null && notify-send '$safeTitle' '$safeBody' >/dev/null 2>&1 &"
+                }
+            }
+
+            DevicePlatform.WINDOWS_WSL -> {
+                if (filePath.isNotBlank()) {
+                    "WINP=\$(wslpath -w '$safePath' 2>/dev/null || echo ''); " +
+                        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -WindowStyle Hidden -Command \"" +
+                        "Add-Type -AssemblyName System.Windows.Forms; " +
+                        "\$p='\$WINP'; " +
+                        "\$n=New-Object System.Windows.Forms.NotifyIcon; " +
+                        "\$n.Icon=[System.Drawing.SystemIcons]::Information; \$n.Visible=\$true; " +
+                        "if(\$p){ \$n.add_BalloonTipClicked({ try{ Start-Process \$p }catch{} }); }; " +
+                        "\$n.ShowBalloonTip(8000,'$safeTitle','$safeBody',[System.Windows.Forms.ToolTipIcon]::Info); " +
+                        "Start-Sleep -Seconds 10; \$n.Dispose()\" >/dev/null 2>&1 &"
+                } else {
+                    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -WindowStyle Hidden -Command \"" +
+                        "Add-Type -AssemblyName System.Windows.Forms; " +
+                        "\$n=New-Object System.Windows.Forms.NotifyIcon; " +
+                        "\$n.Icon=[System.Drawing.SystemIcons]::Information; \$n.Visible=\$true; " +
+                        "\$n.ShowBalloonTip(4000,'$safeTitle','$safeBody',[System.Windows.Forms.ToolTipIcon]::Info); " +
+                        "Start-Sleep -Seconds 5; \$n.Dispose()\" >/dev/null 2>&1 &"
+                }
+            }
+
             DevicePlatform.NAS -> return
         }
         execFull(client, cmd, timeoutSec = 4)
     }
+
+    private fun escapeShellSingleQuoted(raw: String): String =
+        raw.replace("'", "'\\''").replace("\n", "").replace("\r", "")
 
     private fun escapeSingleLine(raw: String): String =
         raw.replace("\r", " ")

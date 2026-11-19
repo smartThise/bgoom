@@ -68,6 +68,7 @@ import com.bgoom.app.notify.BgoomNotifier
 import com.bgoom.app.ssh.BgoomSyncService
 import com.bgoom.app.ssh.SshHubRepository
 import com.bgoom.app.util.AndroidFileHelper
+import com.bgoom.app.util.BatteryOptimizationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,23 +102,35 @@ fun TransferHubScreen(
     val notifPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             BgoomSyncService.start(context)
-            onShowActionToast("已开启后台实时接收（状态栏实况胶囊就绪）", null, null)
+            if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
+                onShowActionToast("已开启后台常驻接收（建议加入电池白名单防杀后台）", "设白名单") {
+                    BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
+                }
+            } else {
+                onShowActionToast("已开启后台常驻接收（息屏/划掉卡片仍可接收）", null, null)
+            }
         } else {
-            onShowActionToast("请授予通知权限以便弹出实况胶囊与来件提醒", null, null)
+            onShowActionToast("请授予通知权限以便常驻后台与弹出通知", null, null)
         }
     }
 
     fun toggleLiveReceive(enable: Boolean) {
         if (!enable) {
             BgoomSyncService.stop(context)
-            onShowActionToast("已关闭后台实时接收", null, null)
+            onShowActionToast("已关闭后台常驻接收", null, null)
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !BgoomNotifier.hasNotificationPermission(context)) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             BgoomSyncService.start(context)
-            onShowActionToast("已开启实时接收，电脑右键发文件/文字将秒达手机", null, null)
+            if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
+                onShowActionToast("已开启后台常驻！点击右侧设为免电池优化防杀后台", "免优化") {
+                    BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
+                }
+            } else {
+                onShowActionToast("已开启后台常驻接收，开机自启且划掉页面不断连", null, null)
+            }
         }
     }
 
@@ -228,34 +241,54 @@ fun TransferHubScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Live Receive Capsule Toggle Card
+        // Live Receive Capsule & Background Keep-Alive Toggle Card
         item {
+            val batteryExempt = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = if (syncRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
                 else MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.NotificationsActive,
-                        contentDescription = null,
-                        tint = if (syncRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("实时接收电脑右键推送", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (syncRunning) "监听中 · ${activeDevice.name} 右键发来文件/文字将弹胶囊与通知"
-                            else "开启后可在电脑端右键直发文件或选中文字到手机",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.NotificationsActive,
+                            contentDescription = null,
+                            tint = if (syncRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("后台常驻接收（开机自启）", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (syncRunning) "常驻运行中 · 不打开 App 也能自动接收 ${activeDevice.name} 的推送"
+                                else "开启后划掉后台、息屏或重启都能自动接收电脑推送",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = syncRunning, onCheckedChange = ::toggleLiveReceive)
                     }
-                    Switch(checked = syncRunning, onCheckedChange = ::toggleLiveReceive)
+                    if (syncRunning && !batteryExempt) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "荣耀等国产系统可能休眠后台，建议加入电池白名单",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context) }) {
+                                Text("一键防杀后台")
+                            }
+                        }
+                    }
                 }
             }
         }

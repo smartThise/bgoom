@@ -10,11 +10,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import com.bgoom.app.notify.BgoomNotifier
 import com.bgoom.app.ui.BgoomRoot
+import com.bgoom.app.ui.BgoomRoute
 import com.bgoom.app.ui.IncomingSharePayload
+import com.bgoom.app.util.AndroidFileHelper
 
 class MainActivity : ComponentActivity() {
 
     private val incomingShareState = mutableStateOf<IncomingSharePayload?>(null)
+    private val requestedRouteState = mutableStateOf<BgoomRoute?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +31,8 @@ class MainActivity : ComponentActivity() {
                 app = bgoomApp,
                 incomingShare = incomingShareState.value,
                 onClearIncomingShare = { incomingShareState.value = null },
+                requestedRoute = requestedRouteState.value,
+                onConsumeRequestedRoute = { requestedRouteState.value = null },
             )
         }
     }
@@ -42,6 +47,29 @@ class MainActivity : ComponentActivity() {
     private fun parseIncomingIntent(intent: Intent?) {
         if (intent == null) return
         val action = intent.action ?: return
+
+        // Direct open file when user taps an incoming file notification
+        if (action == ACTION_OPEN_RECEIVED_FILE) {
+            val uriStr = intent.getStringExtra(EXTRA_OPEN_FILE_URI).orEmpty()
+            val mime = intent.getStringExtra(EXTRA_OPEN_FILE_MIME).orEmpty()
+            val name = intent.getStringExtra(EXTRA_OPEN_FILE_NAME).orEmpty()
+            if (uriStr.isNotBlank()) {
+                AndroidFileHelper.openFile(
+                    context = this,
+                    uriString = uriStr,
+                    fallbackLocalPath = name,
+                    mimeType = mime.ifBlank { AndroidFileHelper.guessMimeType(name) },
+                )
+            }
+            requestedRouteState.value = BgoomRoute.TRANSFER
+            return
+        }
+
+        if (action == ACTION_OPEN_NOTES) {
+            requestedRouteState.value = BgoomRoute.NOTES
+            return
+        }
+
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
 
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -78,5 +106,13 @@ class MainActivity : ComponentActivity() {
                 mimeType = intent.type,
             )
         }
+    }
+
+    companion object {
+        const val ACTION_OPEN_RECEIVED_FILE = "com.bgoom.app.action.OPEN_RECEIVED_FILE"
+        const val ACTION_OPEN_NOTES = "com.bgoom.app.action.OPEN_NOTES"
+        const val EXTRA_OPEN_FILE_URI = "extra_open_file_uri"
+        const val EXTRA_OPEN_FILE_MIME = "extra_open_file_mime"
+        const val EXTRA_OPEN_FILE_NAME = "extra_open_file_name"
     }
 }

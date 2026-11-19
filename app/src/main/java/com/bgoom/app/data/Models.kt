@@ -67,6 +67,7 @@ data class AppSettings(
     val sshOcrCommandTemplate: String = "python3 -m oxr.cli --input {IMAGE} --format {FORMAT}",
     val notifyDesktopOnSend: Boolean = true,
     val autoCopyIncomingText: Boolean = true,
+    val keepAliveReceiveEnabled: Boolean = false,
     val githubRepo: String = "smartThise/bgoom",
     val githubMirrorPrefix: String = "",
 )
